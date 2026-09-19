@@ -12,6 +12,7 @@ export function createEmptyPlan(name = '未命名方案'): Plan {
     tables: [],
     guests: [],
     rules: [],
+    groups: [],
     updatedAt: Date.now(),
   };
 }
@@ -20,48 +21,63 @@ export function clonePlan(plan: Plan): Plan {
   return JSON.parse(JSON.stringify(plan));
 }
 
+/** 兼容旧版本方案：补齐 groups 等后加的字段 */
+export function normalizePlan(plan: Plan): Plan {
+  return {
+    ...plan,
+    groups: Array.isArray(plan.groups) ? plan.groups : [],
+    tables: plan.tables ?? [],
+    guests: plan.guests ?? [],
+    rules: plan.rules ?? [],
+  };
+}
+
+/**
+ * 实时冲突检测：在当前已经摆上桌的座位里，把违规的宾客两两标出来。
+ * 规则端点支持宾客或派别（group）：
+ *  - apart / separate（禁止同桌 / 必须分开）：端点展开成宾客，同桌即冲突
+ *  - together（必须同桌）：两人都已入座但不在同一桌即冲突
+ *  - adjacent：实时检测里不做强制（属于号位级约束）
+ */
 export function getConflictMap(plan: Plan): Map<string, string[]> {
   const map = new Map<string, string[]>();
-  const { tables, rules } = plan;
+  const { tables, rules, guests } = plan;
+
+  const addConflict = (a: string, b: string) => {
+    if (a === b) return;
+    if (!map.has(a)) map.set(a, []);
+    if (!map.has(b)) map.set(b, []);
+    if (!map.get(a)!.includes(b)) map.get(a)!.push(b);
+    if (!map.get(b)!.includes(a)) map.get(b)!.push(a);
+  };
+
+  const guestById = new Map(guests.map((g) => [g.id, g]));
+  const endpointGuestIds = (id: string, kind?: 'guest' | 'group'): string[] => {
+    if (kind === 'group') return guests.filter((g) => g.groupId === id).map((g) => g.id);
+    if (kind === 'guest') return guestById.has(id) ? [id] : [];
+    // 旧数据兼容：先按宾客找，找不到再当派别
+    if (guestById.has(id)) return [id];
+    return guests.filter((g) => g.groupId === id).map((g) => g.id);
+  };
 
   for (const rule of rules) {
-    if (rule.type === 'apart') {
+    if (rule.type === 'apart' || rule.type === 'separate') {
+      const listA = endpointGuestIds(rule.a, rule.aKind);
+      const listB = endpointGuestIds(rule.b, rule.bKind);
       for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
-        }
-      }
-    } else if (rule.type === 'separate') {
-      for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
-        }
+        const seatedA = listA.filter((gid) => table.seatOrder.includes(gid));
+        const seatedB = listB.filter((gid) => table.seatOrder.includes(gid));
+        for (const a of seatedA) for (const b of seatedB) addConflict(a, b);
       }
     } else if (rule.type === 'together') {
-      let same = false;
-      for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) same = true;
-      }
-      if (!same) {
-        const ta = tables.find((t) => t.seatOrder.includes(rule.a));
-        const tb = tables.find((t) => t.seatOrder.includes(rule.b));
-        if (ta && tb && ta.id !== tb.id) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
+      const listA = endpointGuestIds(rule.a, rule.aKind);
+      const listB = endpointGuestIds(rule.b, rule.bKind);
+      for (const a of listA) {
+        for (const b of listB) {
+          if (a === b) continue;
+          const ta = tables.find((t) => t.seatOrder.includes(a));
+          const tb = tables.find((t) => t.seatOrder.includes(b));
+          if (ta && tb && ta.id !== tb.id) addConflict(a, b);
         }
       }
     }

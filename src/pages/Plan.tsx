@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getPlan, savePlan, setRecentPlanId } from '../db';
 import { createHistoryManager } from '../history';
-import { getConflictMap, getTableStats } from '../utils';
+import { getConflictMap, getTableStats, normalizePlan } from '../utils';
+import { autoArrange } from '../seating/arrange';
 import type { Plan as PlanType, Command } from '../types';
 import GuestPool from '../components/GuestPool';
 import Canvas from '../components/Canvas';
 import RulesPanel from '../components/RulesPanel';
 import StatsBar from '../components/StatsBar';
+import PrecheckPanel from '../components/PrecheckPanel';
 
 export default function PlanPage() {
   const { id } = useParams<{ id: string }>();
@@ -18,13 +20,15 @@ export default function PlanPage() {
   const [dragGuestId, setDragGuestId] = useState<string | null>(null);
   const historyRef = useRef<ReturnType<typeof createHistoryManager> | null>(null);
   const [conflictMap, setConflictMap] = useState<Map<string, string[]>>(new Map());
+  const [showPrecheck, setShowPrecheck] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    getPlan(id).then((p) => {
+    getPlan(id).then((raw) => {
+      const p = raw ? normalizePlan(raw) : null;
       if (!p) {
-        const fallback = { id, name: '未命名方案', tables: [], guests: [], rules: [], updatedAt: Date.now() };
+        const fallback: PlanType = { id, name: '未命名方案', tables: [], guests: [], rules: [], groups: [], updatedAt: Date.now() };
         historyRef.current = createHistoryManager(fallback);
         setPlan(fallback);
       } else {
@@ -85,6 +89,23 @@ export default function PlanPage() {
 
   const stats = getTableStats(plan);
 
+  const handleAutoSeat = () => {
+    const result = autoArrange({
+      guests: plan.guests.map((g) => ({ id: g.id, name: g.name, partySize: g.partySize, groupId: g.groupId })),
+      groups: plan.groups,
+      tables: plan.tables.map((t) => ({ id: t.id, label: t.label, capacity: t.capacity })),
+      rules: plan.rules,
+    });
+    if (!result.ok) {
+      alert(result.reason);
+      return;
+    }
+    const assignedCount = Object.keys(result.assignments).length;
+    if (!confirm(`将按约束把 ${assignedCount} 位宾客整体重新分桌（必须同桌不拆散、互斥不同桌），现有手动座位会被覆盖，确定？`)) return;
+    dispatch({ type: 'autoSeat', assignments: result.assignments });
+    setShowPrecheck(false);
+  };
+
   return (
     <div className="plan-page">
       <header className="plan-header">
@@ -106,6 +127,7 @@ export default function PlanPage() {
       <div className="plan-body">
         <GuestPool
           guests={plan.guests}
+          groups={plan.groups}
           selectedId={selectedGuestId}
           onSelect={setSelectedGuestId}
           onAdd={(g) => dispatch({ type: 'addGuest', guest: g })}
@@ -127,8 +149,16 @@ export default function PlanPage() {
         <RulesPanel
           plan={plan}
           dispatch={dispatch}
+          onOpenPrecheck={() => setShowPrecheck(true)}
         />
       </div>
+      {showPrecheck && (
+        <PrecheckPanel
+          plan={plan}
+          onClose={() => setShowPrecheck(false)}
+          onAutoSeat={handleAutoSeat}
+        />
+      )}
     </div>
   );
 }

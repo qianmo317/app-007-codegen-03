@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { Guest } from '../types';
+import type { Guest, Group } from '../types';
 import { generateId, parseGuestsText } from '../utils';
 import { TAG_OPTIONS } from '../types';
 
 interface Props {
   guests: Guest[];
+  groups: Group[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onAdd: (guest: Guest) => void;
@@ -14,7 +15,7 @@ interface Props {
   onUpdate?: (guest: Guest) => void;
 }
 
-export default function GuestPool({ guests, selectedId, onSelect, onAdd, onRemove, onDragStart, conflictMap, onUpdate }: Props) {
+export default function GuestPool({ guests, groups, selectedId, onSelect, onAdd, onRemove, onDragStart, conflictMap, onUpdate }: Props) {
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [filterTag, setFilterTag] = useState<string>('');
@@ -105,6 +106,18 @@ export default function GuestPool({ guests, selectedId, onSelect, onAdd, onRemov
             </div>
           </label>
           <label>
+            派别（家庭 / 圈子）
+            <select
+              value={selectedGuest.groupId ?? ''}
+              onChange={(e) => onUpdate({ ...selectedGuest, groupId: e.target.value || undefined })}
+            >
+              <option value="">未分组</option>
+              {groups.map((grp) => (
+                <option key={grp.id} value={grp.id}>{grp.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
             备注
             <input
               value={selectedGuest.note || ''}
@@ -135,6 +148,11 @@ export default function GuestPool({ guests, selectedId, onSelect, onAdd, onRemov
               onClick={() => onSelect(selectedId === g.id ? null : g.id)}
             >
               <span className="guest-name">{g.name}</span>
+              {g.groupId && (
+                <span className="guest-group-badge" title={groups.find((grp) => grp.id === g.groupId)?.name}>
+                  {groups.find((grp) => grp.id === g.groupId)?.name ?? ''}
+                </span>
+              )}
               {g.tags.length > 0 && <span className="guest-tags">{g.tags.join(', ')}</span>}
               {isConflict && (
                 <span

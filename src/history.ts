@@ -31,6 +31,9 @@ export function createHistoryManager(initial: Plan): HistoryManager {
       case 'updateRules':
         p.rules = deepClone(command.rules);
         break;
+      case 'updateGroups':
+        p.groups = deepClone(command.groups);
+        break;
       case 'updateTable': {
         const idx = p.tables.findIndex((t) => t.id === command.table.id);
         if (idx >= 0) p.tables[idx] = deepClone(command.table);
@@ -68,6 +71,27 @@ export function createHistoryManager(initial: Plan): HistoryManager {
             existing.splice(idx, 0, guestId);
             tt.seatOrder = existing;
           }
+        }
+        break;
+      }
+      case 'autoSeat': {
+        // 清空现有座位，按 assignments 整体重排；同一桌内按派别/姓名聚拢，
+        // partySize>1 的宾客连续占多个号位。
+        const grouped = new Map<string, { id: string; groupId?: string; name: string; size: number }[]>();
+        for (const g of p.guests) {
+          const tid = command.assignments[g.id];
+          if (!tid || !p.tables.some((t) => t.id === tid)) continue;
+          if (!grouped.has(tid)) grouped.set(tid, []);
+          grouped.get(tid)!.push({ id: g.id, groupId: g.groupId, name: g.name, size: Math.max(1, g.partySize) });
+        }
+        for (const t of p.tables) {
+          const list = grouped.get(t.id) ?? [];
+          list.sort((x, y) => (x.groupId ?? '').localeCompare(y.groupId ?? '') || x.name.localeCompare(y.name));
+          const order: string[] = [];
+          for (const item of list) {
+            for (let i = 0; i < item.size && order.length < t.capacity; i++) order.push(item.id);
+          }
+          t.seatOrder = order;
         }
         break;
       }

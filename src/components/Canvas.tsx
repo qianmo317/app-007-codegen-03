@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { Plan, Table, Command } from '../types';
+import type { Plan, Table, Guest, Command } from '../types';
 import { generateId } from '../utils';
 
 interface Props {
@@ -8,6 +8,45 @@ interface Props {
   setDragGuestId: (id: string | null) => void;
   conflictMap: Map<string, string[]>;
   dispatch: (cmd: Command) => void;
+}
+
+/** 找出 guest 若放到 tableId 会违反的互斥对象（派别级规则同样生效） */
+export function findApartViolations(plan: Plan, guest: Guest, tableId: string): Guest[] {
+  const target = plan.tables.find((t) => t.id === tableId);
+  if (!target) return [];
+  const seated = new Set(target.seatOrder);
+  const blocked: Guest[] = [];
+  const push = (otherId: string) => {
+    if (otherId === guest.id || !seated.has(otherId)) return;
+    const other = plan.guests.find((g) => g.id === otherId);
+    if (other && !blocked.some((b) => b.id === other.id)) blocked.push(other);
+  };
+  for (const rule of plan.rules) {
+    if (rule.type !== 'apart' && rule.type !== 'separate') continue;
+    const matchA =
+      rule.aKind === 'group' ? guest.groupId === rule.a :
+      !rule.aKind && !plan.guests.some((g) => g.id === rule.a) ? guest.groupId === rule.a :
+      guest.id === rule.a;
+    const matchB =
+      rule.bKind === 'group' ? guest.groupId === rule.b :
+      !rule.bKind && !plan.guests.some((g) => g.id === rule.b) ? guest.groupId === rule.b :
+      guest.id === rule.b;
+    if (matchA) {
+      if (rule.bKind === 'group' || (!rule.bKind && !plan.guests.some((g) => g.id === rule.b))) {
+        plan.guests.filter((g) => g.groupId === rule.b).forEach((g) => push(g.id));
+      } else {
+        push(rule.b);
+      }
+    }
+    if (matchB) {
+      if (rule.aKind === 'group' || (!rule.aKind && !plan.guests.some((g) => g.id === rule.a))) {
+        plan.guests.filter((g) => g.groupId === rule.a).forEach((g) => push(g.id));
+      } else {
+        push(rule.a);
+      }
+    }
+  }
+  return blocked;
 }
 
 export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap, dispatch }: Props) {
@@ -35,6 +74,15 @@ export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap,
       if (table.seatOrder.length >= table.capacity) {
         alert('该桌已满');
         return;
+      }
+      const dragGuest = plan.guests.find((g) => g.id === dragGuestId);
+      if (dragGuest) {
+        const violations = findApartViolations(plan, dragGuest, table.id);
+        if (violations.length > 0) {
+          alert(`不能放到「${table.label}」：${dragGuest.name} 与该桌的 ${violations.map((v) => v.name).join('、')} 有禁止同桌约束（整家派别级约束也生效）。`);
+          setDragGuestId(null);
+          return;
+        }
       }
       dispatch({
         type: 'moveGuest',
@@ -101,6 +149,15 @@ export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap,
       if (toTable.seatOrder.length >= toTable.capacity) {
         alert('该桌已满');
         return;
+      }
+      const dragGuest = plan.guests.find((g) => g.id === dragGuestId);
+      if (dragGuest) {
+        const violations = findApartViolations(plan, dragGuest, tableId);
+        if (violations.length > 0) {
+          alert(`不能放到「${toTable.label}」：${dragGuest.name} 与该桌的 ${violations.map((v) => v.name).join('、')} 有禁止同桌约束。`);
+          setDragGuestId(null);
+          return;
+        }
       }
       dispatch({ type: 'moveGuest', guestId: dragGuestId, fromTableId: fromTable?.id || null, toTableId: tableId, toIndex: index });
     }
