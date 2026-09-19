@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getPlan, savePlan, setRecentPlanId } from '../db';
 import { createHistoryManager } from '../history';
 import { getConflictMap, getTableStats } from '../utils';
+import { buildForbiddenIndex, runPreflight } from '../constraints';
 import type { Plan as PlanType, Command } from '../types';
 import GuestPool from '../components/GuestPool';
 import Canvas from '../components/Canvas';
@@ -24,10 +25,11 @@ export default function PlanPage() {
     if (!id) return;
     getPlan(id).then((p) => {
       if (!p) {
-        const fallback = { id, name: '未命名方案', tables: [], guests: [], rules: [], updatedAt: Date.now() };
+        const fallback = { id, name: '未命名方案', tables: [], guests: [], rules: [], groupRules: [], updatedAt: Date.now() };
         historyRef.current = createHistoryManager(fallback);
         setPlan(fallback);
       } else {
+        if (p.groupRules === undefined) p.groupRules = [];
         historyRef.current = createHistoryManager(p);
         setPlan(p);
         setRecentPlanId(id);
@@ -84,6 +86,8 @@ export default function PlanPage() {
   if (!plan) return <div className="plan-loading">方案不存在</div>;
 
   const stats = getTableStats(plan);
+  const forbiddenIndex = buildForbiddenIndex(plan);
+  const preflight = runPreflight(plan);
 
   return (
     <div className="plan-page">
@@ -102,7 +106,7 @@ export default function PlanPage() {
           <button onClick={() => navigate(`/plan/${plan.id}/print`)}>打印 / 导出</button>
         </div>
       </header>
-      <StatsBar stats={stats} />
+      <StatsBar stats={stats} preflight={preflight} />
       <div className="plan-body">
         <GuestPool
           guests={plan.guests}
@@ -122,11 +126,13 @@ export default function PlanPage() {
           dragGuestId={dragGuestId}
           setDragGuestId={setDragGuestId}
           conflictMap={conflictMap}
+          forbiddenIndex={forbiddenIndex}
           dispatch={dispatch}
         />
         <RulesPanel
           plan={plan}
           dispatch={dispatch}
+          preflight={preflight}
         />
       </div>
     </div>

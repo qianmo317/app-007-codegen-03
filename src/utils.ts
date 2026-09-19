@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Plan } from './types';
+import { buildForbiddenIndex } from './constraints';
 
 export function generateId(): string {
   return uuidv4();
@@ -12,6 +13,7 @@ export function createEmptyPlan(name = '未命名方案'): Plan {
     tables: [],
     guests: [],
     rules: [],
+    groupRules: [],
     updatedAt: Date.now(),
   };
 }
@@ -24,47 +26,31 @@ export function getConflictMap(plan: Plan): Map<string, string[]> {
   const map = new Map<string, string[]>();
   const { tables, rules } = plan;
 
-  for (const rule of rules) {
-    if (rule.type === 'apart') {
-      for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
-        }
-      }
-    } else if (rule.type === 'separate') {
-      for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
-        }
-      }
-    } else if (rule.type === 'together') {
-      let same = false;
-      for (const table of tables) {
-        const hasA = table.seatOrder.includes(rule.a);
-        const hasB = table.seatOrder.includes(rule.b);
-        if (hasA && hasB) same = true;
-      }
-      if (!same) {
-        const ta = tables.find((t) => t.seatOrder.includes(rule.a));
-        const tb = tables.find((t) => t.seatOrder.includes(rule.b));
-        if (ta && tb && ta.id !== tb.id) {
-          if (!map.has(rule.a)) map.set(rule.a, []);
-          if (!map.has(rule.b)) map.set(rule.b, []);
-          if (!map.get(rule.a)!.includes(rule.b)) map.get(rule.a)!.push(rule.b);
-          if (!map.get(rule.b)!.includes(rule.a)) map.get(rule.b)!.push(rule.a);
-        }
+  const flagPair = (a: string, b: string) => {
+    if (!map.has(a)) map.set(a, []);
+    if (!map.has(b)) map.set(b, []);
+    if (!map.get(a)!.includes(b)) map.get(a)!.push(b);
+    if (!map.get(b)!.includes(a)) map.get(b)!.push(a);
+  };
+
+  // 不能同桌 / 必须分桌 / 成组标注：同桌即冲突（成组标注一并展开）
+  const forbidden = buildForbiddenIndex(plan);
+  for (const table of tables) {
+    for (let i = 0; i < table.seatOrder.length; i++) {
+      for (let j = i + 1; j < table.seatOrder.length; j++) {
+        const a = table.seatOrder[i];
+        const b = table.seatOrder[j];
+        if (forbidden.get(a)?.has(b)) flagPair(a, b);
       }
     }
+  }
+
+  // 必须同桌：两人已落座却在不同桌才算冲突（未分配不告警）
+  for (const rule of rules) {
+    if (rule.type !== 'together') continue;
+    const ta = tables.find((t) => t.seatOrder.includes(rule.a));
+    const tb = tables.find((t) => t.seatOrder.includes(rule.b));
+    if (ta && tb && ta.id !== tb.id) flagPair(rule.a, rule.b);
   }
   return map;
 }

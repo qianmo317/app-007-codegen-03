@@ -28,12 +28,23 @@ export type Rule = {
   b: string; // guest id
 };
 
+// 成组标注：两个标签组之间（或同一组内部）整组不能同桌
+export type GroupRule = {
+  id: string;
+  type: 'apart';
+  tagA: string;
+  tagB: string;
+  sameTag: boolean; // true = 同一组内部两两不能同桌
+  createdAt: number;
+};
+
 export type Plan = {
   id: string;
   name: string;
   tables: Table[];
   guests: Guest[];
   rules: Rule[];
+  groupRules?: GroupRule[];
   updatedAt: number;
 };
 
@@ -42,6 +53,7 @@ export type Command =
   | { type: 'updateTables'; tables: Table[] }
   | { type: 'updateGuests'; guests: Guest[] }
   | { type: 'updateRules'; rules: Rule[] }
+  | { type: 'updateGroupRules'; groupRules: GroupRule[] }
   | { type: 'updateTable'; table: Table }
   | { type: 'addGuest'; guest: Guest }
   | { type: 'removeGuest'; guestId: string }

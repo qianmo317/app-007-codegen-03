@@ -31,6 +31,9 @@ export function createHistoryManager(initial: Plan): HistoryManager {
       case 'updateRules':
         p.rules = deepClone(command.rules);
         break;
+      case 'updateGroupRules':
+        p.groupRules = deepClone(command.groupRules);
+        break;
       case 'updateTable': {
         const idx = p.tables.findIndex((t) => t.id === command.table.id);
         if (idx >= 0) p.tables[idx] = deepClone(command.table);

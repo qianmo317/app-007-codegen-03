@@ -7,15 +7,39 @@ interface Props {
   dragGuestId: string | null;
   setDragGuestId: (id: string | null) => void;
   conflictMap: Map<string, string[]>;
+  forbiddenIndex: Map<string, Set<string>>;
   dispatch: (cmd: Command) => void;
 }
 
-export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap, dispatch }: Props) {
+export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap, forbiddenIndex, dispatch }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [draggingTable, setDraggingTable] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [showTableMenu, setShowTableMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const getForbiddenBlockers = (table: Table, guestId: string): string[] => {
+    const forbidden = forbiddenIndex.get(guestId);
+    if (!forbidden) return [];
+    return table.seatOrder.filter((id) => forbidden.has(id));
+  };
+
+  const ensureCanDrop = (guestId: string, toTable: Table): boolean => {
+    if (toTable.seatOrder.length >= toTable.capacity) {
+      alert('该桌已满');
+      return false;
+    }
+    const blockers = getForbiddenBlockers(toTable, guestId);
+    if (blockers.length > 0) {
+      const names = blockers
+        .map((id) => plan.guests.find((g) => g.id === id)?.name || id)
+        .join('、');
+      const guestName = plan.guests.find((g) => g.id === guestId)?.name || '该宾客';
+      alert(`${guestName} 不能与 ${names} 同桌（已在约束规则里标注），这一桌已自动避开，请换一桌。`);
+      return false;
+    }
+    return true;
+  };
 
   const handleDropOnCanvas = (e: React.DragEvent) => {
     e.preventDefault();
@@ -32,10 +56,7 @@ export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap,
     if (table) {
       const fromTable = plan.tables.find((t) => t.seatOrder.includes(dragGuestId));
       if (fromTable?.id === table.id) return;
-      if (table.seatOrder.length >= table.capacity) {
-        alert('该桌已满');
-        return;
-      }
+      if (!ensureCanDrop(dragGuestId, table)) return;
       dispatch({
         type: 'moveGuest',
         guestId: dragGuestId,
@@ -98,10 +119,7 @@ export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap,
       // reorder within same table
       dispatch({ type: 'moveGuest', guestId: dragGuestId, fromTableId: tableId, toTableId: tableId, toIndex: index });
     } else {
-      if (toTable.seatOrder.length >= toTable.capacity) {
-        alert('该桌已满');
-        return;
-      }
+      if (!ensureCanDrop(dragGuestId, toTable)) return;
       dispatch({ type: 'moveGuest', guestId: dragGuestId, fromTableId: fromTable?.id || null, toTableId: tableId, toIndex: index });
     }
     setDragGuestId(null);
@@ -124,13 +142,25 @@ export default function Canvas({ plan, dragGuestId, setDragGuestId, conflictMap,
         {plan.tables.map((table) => {
           const isSelected = selectedTableId === table.id;
           const isFull = table.seatOrder.length >= table.capacity;
+          const dragBlockers = dragGuestId
+            ? getForbiddenBlockers(table, dragGuestId).map(
+                (id) => plan.guests.find((g) => g.id === id)?.name || id,
+              )
+            : [];
+          const isForbidden = dragBlockers.length > 0;
+          const dragGuestAlreadyHere =
+            dragGuestId && table.seatOrder.includes(dragGuestId);
           return (
             <div
               key={table.id}
-              className={`table-item ${table.shape} ${isSelected ? 'selected' : ''} ${isFull ? 'full' : ''}`}
+              className={`table-item ${table.shape} ${isSelected ? 'selected' : ''} ${isFull ? 'full' : ''} ${isForbidden ? 'forbidden' : ''}`}
               style={{ left: table.x, top: table.y }}
+              title={isForbidden ? `此桌有不能同桌的人：${dragBlockers.join('、')}` : undefined}
               onMouseDown={(e) => handleTableMouseDown(e, table)}
             >
+              {isForbidden && !dragGuestAlreadyHere && (
+                <div className="table-forbidden-flag">禁坐：{dragBlockers.join('、')}</div>
+              )}
               <div className="table-label">
                 {isSelected ? (
                   <input
